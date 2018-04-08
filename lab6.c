@@ -55,20 +55,20 @@ void skewing(char type, char direction, int* mat, int size, MPI_Comm cart_comm, 
         MPI_Cart_shift(cart_comm, type, (direction * 2 -1) * shift_count, rank_nightboor, rank_nightboor+1);   
         MPI_Status status;
         
-        MPI_Sendrecv_replace(mat + cart_rank, 1, MPI_INT,
+        MPI_Sendrecv_replace(mat, 1, MPI_INT,
                              rank_nightboor[0], shift_count, rank_nightboor[1], shift_count,
                              cart_comm, &status);
      }
 }
 
-int mult_mat_canon(int* matA, int* matB, int size, MPI_Comm cart_comm, int cart_rank){
+int mult_mat_canon(int matA, int matB, int size, MPI_Comm cart_comm, int cart_rank){
 
     MPI_Comm row_comm, col_comm;
     int matC = 0, row_rank = create_rows(&cart_comm, &row_comm), 
                   col_rank = create_cols(&cart_comm, &col_comm);
     
-    skewing(HORIZONTAL_SKEWING, PRE_SKEWING, matA, size, cart_comm, row_comm, cart_rank, row_rank);
-    skewing(VERTICAL_SKEWING, PRE_SKEWING, matB, size, cart_comm, col_comm, cart_rank, col_rank);
+    skewing(HORIZONTAL_SKEWING, PRE_SKEWING, &matA, size, cart_comm, row_comm, cart_rank, row_rank);
+    skewing(VERTICAL_SKEWING, PRE_SKEWING, &matB, size, cart_comm, col_comm, cart_rank, col_rank);
     
     int rank_neighbor[4];
     MPI_Cart_shift(cart_comm, 0, 1, rank_neighbor + TOP_NEIGHBOR, rank_neighbor + BOTTOM_NEIGHBOR);   
@@ -77,34 +77,36 @@ int mult_mat_canon(int* matA, int* matB, int size, MPI_Comm cart_comm, int cart_
     
     for (int k = 0; k < size; k++){
         // Computation
-        matC += matA[cart_rank] * matB[cart_rank];
+        matC += matA * matB;
         
         // Horizontal shift
-        MPI_Sendrecv_replace(matA + cart_rank, 1, MPI_INT,
+        MPI_Sendrecv_replace(&matA, 1, MPI_INT,
                              rank_neighbor[LEFT_NEIGHBOR], k, 
                              rank_neighbor[RIGHT_NEIGHBOR], k,
                              cart_comm, &status);
         
         // Vertical shift
-        MPI_Sendrecv_replace(matB + cart_rank, 1, MPI_INT,
+        MPI_Sendrecv_replace(&matB, 1, MPI_INT,
                              rank_neighbor[TOP_NEIGHBOR], k, 
                              rank_neighbor[BOTTOM_NEIGHBOR], k,
                              cart_comm, &status);
     }
     
-    skewing(HORIZONTAL_SKEWING, POST_SKEWING, matA, size, cart_comm, row_comm, cart_rank, row_rank);
-    skewing(VERTICAL_SKEWING, POST_SKEWING, matB, size, cart_comm, col_comm, cart_rank, col_rank);
+    skewing(HORIZONTAL_SKEWING, POST_SKEWING, &matA, size, cart_comm, row_comm, cart_rank, row_rank);
+    skewing(VERTICAL_SKEWING, POST_SKEWING, &matB, size, cart_comm, col_comm, cart_rank, col_rank);
     
     MPI_Comm_free(&row_comm);
     MPI_Comm_free(&col_comm);
-    
-    //~ return matC;    
+       
     return matC;    
 }
 
-int mult_mat_fox(int* matA, int* matB, int size, MPI_Comm cart_comm, int cart_rank){    
+int* mult_mat_fox(int* matA, int* matB, int size, int chunksize, MPI_Comm cart_comm, int cart_rank){    
     MPI_Comm row_comm;    
-    int mat_diag_buffer, matC = 0, row_rank = create_rows(&cart_comm, &row_comm);
+    
+    int *mat_diag_buffer = (int*)malloc(chunksize * sizeof(int)),
+        *matC = (int*)malloc(chunksize * sizeof(int)),
+        row_rank = create_rows(&cart_comm, &row_comm);
         
     int rank_neighbor[2];
     MPI_Cart_shift(cart_comm, 0, 1, rank_neighbor + TOP_NEIGHBOR, rank_neighbor + BOTTOM_NEIGHBOR);   
@@ -114,14 +116,15 @@ int mult_mat_fox(int* matA, int* matB, int size, MPI_Comm cart_comm, int cart_ra
         
         // Broadcast        
         if (row_rank == (cart_rank / size + k) % size)
-            mat_diag_buffer = matA[cart_rank];
-        MPI_Bcast(&mat_diag_buffer, 1, MPI_INT, (cart_rank / size + k) % size, row_comm);
+            memcpy(mat_diag_buffer, matA, chunksize * sizeof(int));
+        MPI_Bcast(mat_diag_buffer, chunksize, MPI_INT, (cart_rank / size + k) % size, row_comm);
         
         // Computation
-        matC += mat_diag_buffer * matB[cart_rank];
+        for (int i = 0; i < chunksize; i++)
+            matC[i] += mat_diag_buffer[i] * matB[i];
         
         // Vertical shift
-        MPI_Sendrecv_replace(matB + cart_rank, 1, MPI_INT,
+        MPI_Sendrecv_replace(matB, chunksize, MPI_INT,
                              rank_neighbor[TOP_NEIGHBOR], cart_rank,
                              rank_neighbor[BOTTOM_NEIGHBOR], rank_neighbor[BOTTOM_NEIGHBOR],
                              cart_comm, &status);
@@ -139,18 +142,21 @@ void usage(){
 int main(int argc, char *argv[])
 {
     int main_rank, cart_rank;
-    int size = -1, dims[2];
+    int nprocess, matsize = -1, dims[2];
     
     char algorithm = NO_ALGO;
 
-    int matA[4 * 4] = {5, 9, 8, 8,
-                       6, 2, 4, 9,
-                       5, 1, 2, 2,
-                       1, 1, 2, 5};
-    int matB[4 * 4] = {5, 4, 9, 8,
+    int rawmatA[4 * 4] = {5, 9, 8, 8,
+                          6, 2, 4, 9,
+                          5, 1, 2, 2,
+                          1, 1, 2, 5};
+    int rawmatB[4 * 4] = {5, 4, 9, 8,
                        4, 8, 2, 4,
                        1, 7, 4, 7,
-                       2, 3, 3, 6}, matC;
+                       2, 3, 3, 6};
+    int rawmatC[4 * 4] = {0};
+    
+    int *matA, *matB, *matC;
     //~ int matA[4 * 4] = {1, 2, 3, 4,
                        //~ 5, 6, 7, 8,
                        //~ 9, 10, 11, 12,
@@ -171,8 +177,8 @@ int main(int argc, char *argv[])
     
     // Initialise MPI
     MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-    MPI_Datatype matrixtype, elementtype;
+    MPI_Comm_size(MPI_COMM_WORLD, &nprocess);
+    MPI_Datatype elementtype;
 
     // Retrieve the MPI constants
     MPI_Comm cart_comm;
@@ -192,7 +198,7 @@ int main(int argc, char *argv[])
                     usage();
             } else if (!strcmp (*argv, "--size")){
                 argCount++;
-                size = atoi(*(argv + 1));
+                matsize = atoi(*(argv + 1));
             } else {
                 fprintf(stderr, "Unknow parameter '%s'\n\n", *argv);
             }
@@ -203,49 +209,64 @@ int main(int argc, char *argv[])
             usage();
         }
         
-        if (size == -1){
-            size = DEFAULT_SIZE;
-            fprintf(stderr, "Unspecified size, assuming default size %d\n\n", size);
+        if (matsize == -1){
+            matsize = DEFAULT_SIZE;
+            fprintf(stderr, "Unspecified size, assuming default size %d\n\n", matsize);
         }            
-        //~ MPI_Type_contiguous(size * size, MPI_INT, &matrixtype);
-        //~ MPI_Type_commit (&matrixtype);
     }
 
+    // Gathering main constant from root node
     MPI_Bcast(&algorithm, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
     if (algorithm == NO_ALGO){
         MPI_Finalize();
         return 0;
-    }
+    }    
+    MPI_Bcast(&matsize, 1, MPI_INT, 0, MPI_COMM_WORLD);
     
-    MPI_Scatter(matA, 100, MPI_INT, rbuf, 100, MPI_INT, root, comm);
-    
-    MPI_Bcast(&size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(matA, 1, matrixtype, 0, MPI_COMM_WORLD);
-    MPI_Bcast(matB, 1, matrixtype, 0, MPI_COMM_WORLD);
-        
     // Create the cartesian
-    dims[0] = dims[1] = size;
+    dims[0] = dims[1] = sqrt(nprocess);
     cart_rank = create_cartesian(dims, &cart_comm);
     
-    if (algorithm == NO_ALGO == ALGO_FOX)
-        matC = mult_mat_fox(matA, matB, size, cart_comm, cart_rank);
-    else
-        matC = mult_mat_canon(matA, matB, size, cart_comm, cart_rank);
+    // Registering the element type
+    int chunksize = matsize * matsize / nprocess;
+    MPI_Type_vector(matsize / dims[1], matsize / dims[0], matsize, MPI_INT, &elementtype);
+    MPI_Type_commit (&elementtype);
+    
+    matA = (int*)malloc(chunksize * sizeof(int));
+    matB = (int*)malloc(chunksize * sizeof(int));
     
     
-    if (main_rank == 0){
-        printf("%d ", matC);
-        for (int i = 0; i < size * size; i++){
-            MPI_Recv(&matC, 1, MPI_INT, i, 0, cart_comm, NULL);
-            printf("%d ", matC);
-            if ((i + 1) % size == 0) printf("\n ");
-        }            
-    }
-                
-    else
-        MPI_Send(&matC, 1, MPI_INT, 0, 0, cart_comm);
+    
+    int* displs = (int *)malloc(nprocess*sizeof(int)); 
+    int* rcounts = (int *)malloc(nprocess*sizeof(int)); 
+    
+    for (int i = 0; i < nprocess; i++) { 
+        displs[i] = 1; 
+        rcounts[i] = 0; 
+    } 
+    
+    MPI_Scatterv(rawmatA, rcounts, displs, elementtype, matA, chunksize, MPI_INT, 0, cart_comm); 
+    //~ MPI_Scatter(rawmatA, 1, elementtype, matA, chunksize, MPI_INT, 0, cart_comm);
+    //~ MPI_Scatterv(rawmatB, 1, cart_rank, elementtype, matB, chunksize, MPI_INT, 0, cart_comm);
+    
+    //~ if (algorithm == ALGO_FOX)
+        //~ matC = mult_mat_fox(matA, matB, dims[0], chunksize * sizeof(int), cart_comm, cart_rank);
+    //~ else
+        //~ matC = mult_mat_canon(matA, matB, matsize, cart_comm, cart_rank);
 
+    //~ MPI_Gatherv(matC, chunksize, MPI_INT, rawmatC, 1, elementtype, 0, cart_comm); 
+    //~ MPI_Gatherv(matC, chunksize, MPI_INT, rawmatC, rcounts, displs, elementtype, 0, cart_comm); 
+    
+    if (cart_rank == 1){
+        //~ for (int i = 0; i < matsize * matsize; i++){
+            //~ printf("%d ", rawmatC[i]);
+            //~ if ((i + 1) % matsize == 0) printf("\n");
+        //~ }            
+        for (int i = 0; i < 4; i++){
+            printf("%d ", matA[i]);
+        }      
+        printf("\n");      
+    }
     
     MPI_Comm_free(&cart_comm);
     MPI_Finalize();
