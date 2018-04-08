@@ -7,15 +7,15 @@
 
 int main(int argc, char *argv[])
 {
-  int my_rank,my_newrank;
+  int my_rank,my_newrank,row_rank;
   int size, dims[2], period[2] = {1, 1}, reorder = 1, coord[2];
 
-  int matA[4][4] = {{0, 1, 1, 2},
-                    {0, 1, 1, 2},
-                    {0, 1, 1, 2},
-                    {0, 1, 1, 2}};
+  int matA[4][4] = {{1, 1, 1, 2},
+                    {3, 1, 1, 2},
+                    {5, 1, 1, 2},
+                    {2, 1, 1, 2}};
 
-  int matB[4][4] = {{0, 1, 1, 2},
+  int matB[4][4] = {{0 , 1, 1, 2},
                     {0, 1, 1, 2},
                     {0, 1, 1, 2},
                     {0, 1, 1, 2}};
@@ -46,6 +46,7 @@ int main(int argc, char *argv[])
 
   int remain_dims[2] = {0, 1};    //row communicator -> so keep all the columns and create as many subcomms as there are rows
   MPI_Cart_sub(comm, remain_dims, &subcomm);
+  MPI_Comm_rank(subcomm,&row_rank);
 
   for (int k = 0; k < q; k++){
 //creating a copy of A
@@ -63,26 +64,30 @@ int main(int argc, char *argv[])
 
     }
 
+    if (my_newrank == 0){
+           printf("[%d, " , matC[0][0]);
+           for (int i = 0; i < q; i++){
+               for (int j = (!i ? 1 : 0); j < q; j++){
+                   MPI_Recv(matC[i] + j, 1, MPI_INT, i * q + j, 0, comm, NULL);
+                   printf("%d, ", matC[i][j]);
+               }
+               printf("\n ");
+           }
+           printf("]");
+       }
+
+       else
+   MPI_Send(matC[my_newrank / 4] + row_rank, 1, MPI_INT, 0, 0, comm);
+
 /*
-
-    int rank_nightboor[2];
-    MPI_Cart_shift(comm, 0, 1, rank_nightboor, rank_nightboor+1);
-    //~ printf("My rank is %d, up is %d and down is %d, transmitting %d\n", my_rank, rank_nightboor[0], rank_nightboor[1], matB[my_rank / 4][my_rank % 4]);
-    MPI_Status status;
-    MPI_Sendrecv(matB[my_rank / 4] + (my_rank % 4), sizeof(int), MPI_INT,
-            rank_nightboor[0], 0,
-            matB[my_rank / 4] + (my_rank % 4), sizeof(int), MPI_INT,
-            rank_nightboor[1], 0,
-            MPI_COMM_WORLD, &status);
-
-    printf("K=%d result to=%d for %d\n", k, status.MPI_ERROR, my_rank);
-  }
- */
+if(my_newrank == 0){
+ for(int i =0; i<4; i++){
+   printf("\n");
+   for(int j = 0; j<4;j++)
+    printf("%d\t",matC[i][j] );
+}
+}
+*/
   MPI_Finalize();
-  for(int i =0; i<4; i++){
-    printf("\n");
-    for(int j = 0; j<4;j++)
-     printf("%d\t",matC[i][j] );
-  }
 
 }
