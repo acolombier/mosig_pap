@@ -48,6 +48,9 @@ int main(int argc, char *argv[])
 
     for (int k = 0; k < 3; k++){
         //~ if (k == 3)
+        
+        for (int r = 0; r < q; r++)
+            memcpy(matBuffer[r], matA[r], sizeof(int) * q);
 
         if (row_rank == (cart_rank / 4 + k) % 4)
             matBuffer[cart_rank / 4][row_rank] = matA[cart_rank / 4][row_rank],
@@ -73,15 +76,15 @@ int main(int argc, char *argv[])
     }
     
     if (cart_rank == 0){
-        printf("[");
+        printf("[%d, ", matC[0][0]);
         for (int i = 0; i < q; i++){
             for (int j = (!i ? 1 : 0); j < q; j++){
                 MPI_Recv(matC[i] + j, 1, MPI_INT, i * q + j, 0, cart_comm, NULL);
                 printf("%d, ", matC[i][j]);
             }
-            printf("\n ");
+            if (i != 3) printf("\n ");
         }               
-        printf("]"); 
+        printf("]\n"); 
     }
                 
     else
