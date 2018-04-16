@@ -240,25 +240,26 @@ int main(int argc, char *argv[])
     //dimensions of block
     int blocksize = matsize/dims[0];
     
+    //
     MPI_Type_vector(blocksize, blocksize, matsize, MPI_INT, &elementtype);
     MPI_Type_commit (&elementtype);
     
     for (int i = 0; i < q; i++) { 
        for(int j=0;j< q;j++){
-         displs[i*q + j] = i*matsize*blocksize + j*blocksize;
+         displs[i*q + j] = i*matsize*blocksize + j*blocksize;     //displacement relative to the buffer
          counts[i*q + j] = 1; 
       } 
     }
 
-    MPI_Scatterv(rawmatA, counts, displs, element_type, matA, chunksize, MPI_INT, 0, cart_comm);
-    MPI_Scatterv(rawmatB, counts, displs, element_type, matB, chunksize, MPI_INT, 0, cart_comm); 
+    MPI_Scatterv(rawmatA, counts, displs, elementtype, matA, chunksize, MPI_INT, 0, cart_comm);
+    MPI_Scatterv(rawmatB, counts, displs, elementtype, matB, chunksize, MPI_INT, 0, cart_comm); 
     
     if (algorithm == ALGO_FOX)
         matC = mult_mat_fox(matA, matB, dims[0], chunksize * sizeof(int), cart_comm, cart_rank);
     else
         matC = mult_mat_canon(matA, matB, matsize, cart_comm, cart_rank);
 
-    MPI_Gatherv(matC, chunksize, MPI_INT, rawmatC, counts, displs, element_type, 0 , cart_comm); 
+    MPI_Gatherv(matC, chunksize, MPI_INT, rawmatC, counts, displs, elementtype, 0 , cart_comm); 
     
 
     if (cart_rank == 1){
