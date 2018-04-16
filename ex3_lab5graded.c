@@ -141,43 +141,28 @@ void usage(){
 int main(int argc, char *argv[])
 {
     int main_rank, cart_rank;
-    int nprocess, matsize = -1, dims[2];
+    int nprocess, matsize = -1, dims[2],q;
     
     char algorithm = NO_ALGO;
 
-    int rawmatA[4 * 4] = {5, 9, 8, 8,
-                          6, 2, 4, 9,
-                          5, 1, 2, 2,
-                          1, 1, 2, 5};
-    int rawmatB[4 * 4] = {5, 4, 9, 8,
-                       4, 8, 2, 4,
-                       1, 7, 4, 7,
-                       2, 3, 3, 6};
-    int rawmatC[4 * 4] = {0};
+    int rawmatA[4][4] = {{5, 9, 8, 8},
+                          {6, 2, 4, 9},
+                          {5, 1, 2, 2},
+                          {1, 1, 2, 5}};
+
+    int rawmatB[4][4] = {{5, 4, 9, 8},
+                       {4, 8, 2, 4},
+                       {1, 7, 4, 7},
+                       {2, 3, 3, 6}};
+    int rawmatC[4][4] = {0};
     
     int *matA, *matB, *matC;
-    //~ int matA[4 * 4] = {1, 2, 3, 4,
-                       //~ 5, 6, 7, 8,
-                       //~ 9, 10, 11, 12,
-                       //~ 13, 14, 15, 16};
-    //~ int matB[4 * 4] = {1, 2, 3, 4,
-                       //~ 5, 6, 7, 8,
-                       //~ 9, 10, 11, 12,
-                       //~ 13, 14, 15, 16}, matC;
-    //~ int matA[4 * 4] = {1, 2, 3, 4,
-                       //~ 1, 2, 3, 4,
-                       //~ 1, 2, 3, 4,
-                       //~ 1, 2, 3, 4};
-    //~ int matB[4 * 4] = {1, 2, 3, 4,
-                       //~ 1, 2, 3, 4,
-                       //~ 1, 2, 3, 4,
-                       //~ 1, 2, 3, 4}, matC;
     
     
     // Initialise MPI
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &nprocess);
-    MPI_Datatype elementtype;
+    MPI_Datatype elementtype,newtype;
 
     // Retrieve the MPI constants
     MPI_Comm cart_comm;
@@ -223,42 +208,41 @@ int main(int argc, char *argv[])
     MPI_Bcast(&matsize, 1, MPI_INT, 0, MPI_COMM_WORLD);
     
     // Create the cartesian
-    dims[0] = dims[1] = sqrt(nprocess);
+    q = dims[0] = dims[1] = sqrt(nprocess);
     cart_rank = create_cartesian(dims, &cart_comm);
     
     // Registering the element type
     int chunksize = matsize * matsize / nprocess;
-    
+  
     matA = (int*)malloc(chunksize * sizeof(int));
-    matB = (int*)malloc(chunksize * sizeof(int));
-    
-    
-    
-    int* displs = (int *)malloc(nprocess*sizeof(int)); 
-    int* counts = (int *)malloc(nprocess*sizeof(int)); 
-    //dimensions of block
+    matB = (int*)malloc(chunksize * sizeof(int)); 
+
+   int displs[nprocess], counts[nprocess];    
+
+//dimensions of block
     int blocksize = matsize/dims[0];
     
     //
     MPI_Type_vector(blocksize, blocksize, matsize, MPI_INT, &elementtype);
     MPI_Type_commit (&elementtype);
-    
-    for (int i = 0; i < dims[0]; i++) { 
-       for(int j=0;j< dims[0];j++){
-         displs[i*dims[0] + j] = i*matsize*blocksize + j*blocksize;     //displacement relative to the buffer
-         counts[i*dims[0] + j] = 1; 
+    MPI_Type_create_resized(elementtype,0,sizeof(int),&newtype);
+
+    for (int i = 0; i < q; i++) { 
+       for(int j=0;j< q;j++){
+         displs[i*q + j] = i*matsize*blocksize + j*blocksize;     //displacement relative to the buffer
+         counts[i*q + j] = 1; 
       } 
     }
 
-    MPI_Scatterv(rawmatA, counts, displs, elementtype, matA, chunksize, MPI_INT, 0, cart_comm);
-    MPI_Scatterv(rawmatB, counts, displs, elementtype, matB, chunksize, MPI_INT, 0, cart_comm); 
-    
+    MPI_Scatterv(rawmatA, counts, displs, newtype, matA, chunksize, MPI_INT, 1, MPI_COMM_WORLD);
+    MPI_Scatterv(rawmatB, counts, displs, newtype, matB, chunksize, MPI_INT, 0, MPI_COMM_WORLD); 
+
     if (algorithm == ALGO_FOX)
         matC = mult_mat_fox(matA, matB, dims[0], chunksize * sizeof(int), cart_comm, cart_rank);
     else
         matC = mult_mat_canon(matA, matB, matsize, cart_comm, cart_rank);
 
-    MPI_Gatherv(matC, chunksize, MPI_INT, rawmatC, counts, displs, elementtype, 0 , cart_comm); 
+    MPI_Gatherv(matC, chunksize, MPI_INT, rawmatC, counts, displs, newtype, 0 , cart_comm); 
     
 
     if (cart_rank == 0){
@@ -266,9 +250,9 @@ int main(int argc, char *argv[])
             //~ printf("%d ", rawmatC[i]);
             //~ if ((i + 1) % matsize == 0) printf("\n");
         //~ }            
-        for (int i = 0; i < 4; i++){
-            printf("%d ", matA[i]);
-        }      
+        for (int i = 0; i < chunksize; i++){
+            printf("%d ", matA[i]);      
+     }
         printf("\n");      
     }
     
