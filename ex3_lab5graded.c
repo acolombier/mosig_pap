@@ -1,4 +1,3 @@
-
 #include <mpi.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -244,10 +243,10 @@ int main(int argc, char *argv[])
     MPI_Type_vector(blocksize, blocksize, matsize, MPI_INT, &elementtype);
     MPI_Type_commit (&elementtype);
     
-    for (int i = 0; i < q; i++) { 
-       for(int j=0;j< q;j++){
-         displs[i*q + j] = i*matsize*blocksize + j*blocksize;     //displacement relative to the buffer
-         counts[i*q + j] = 1; 
+    for (int i = 0; i < dims[0]; i++) { 
+       for(int j=0;j< dims[0];j++){
+         displs[i*dims[0] + j] = i*matsize*blocksize + j*blocksize;     //displacement relative to the buffer
+         counts[i*dims[0] + j] = 1; 
       } 
     }
 
@@ -262,7 +261,7 @@ int main(int argc, char *argv[])
     MPI_Gatherv(matC, chunksize, MPI_INT, rawmatC, counts, displs, elementtype, 0 , cart_comm); 
     
 
-    if (cart_rank == 1){
+    if (cart_rank == 0){
         //~ for (int i = 0; i < matsize * matsize; i++){
             //~ printf("%d ", rawmatC[i]);
             //~ if ((i + 1) % matsize == 0) printf("\n");
@@ -276,3 +275,4 @@ int main(int argc, char *argv[])
     MPI_Comm_free(&cart_comm);
     MPI_Finalize();
 return EXIT_SUCCESS;
+}
