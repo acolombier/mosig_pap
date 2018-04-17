@@ -144,18 +144,16 @@ int main(int argc, char *argv[])
     
     char algorithm = NO_ALGO;
 
-    int rawmatA[4][4] = {{5, 9, 8, 8},
-                         {6, 2, 4, 9},
-                         {5, 1, 2, 2},
-                         {1, 1, 2, 5}};
+    int matA[4 * 4] = {5, 9, 8, 8,
+                       6, 2, 4, 9,
+                       5, 1, 2, 2,
+                       1, 1, 2, 5};
 
-    int rawmatB[4][4] = {{5, 4, 9, 8},
-                         {4, 8, 2, 4},
-                         {1, 7, 4, 7},
-                         {2, 3, 3, 6}};
-    int rawmatC[4][4] = {0};
-    
-    int matA, matB, matC;
+    int matB[4 * 4] = {5, 4, 9, 8,
+                       4, 8, 2, 4,
+                       1, 7, 4, 7,
+                       2, 3, 3, 6};
+    int matC[4 * 4] = {0};
     
     // Initialise MPI
     MPI_Init(&argc, &argv);
@@ -200,26 +198,10 @@ int main(int argc, char *argv[])
     dims[0] = dims[1] = sqrt(nprocess);
     cart_rank = create_cartesian(dims, &cart_comm);
     
-    MPI_Scatter(rawmatA, 1, MPI_INT, &matA, 1, MPI_INT, 0, cart_comm); 
-    MPI_Scatter(rawmatB, 1, MPI_INT, &matB, 1, MPI_INT, 0, cart_comm); 
-    
     if (algorithm == ALGO_FOX)
-        matC = mult_mat_fox(matA, matB, dims[0], cart_comm, cart_rank);
+        matC[cart_rank] = mult_mat_fox(matA[cart_rank], matB[cart_rank], dims[0], cart_comm, cart_rank);
     else
-        matC = mult_mat_cannon(matA, matB, dims[0], cart_comm, cart_rank);
-
-    MPI_Gather(&matC, 1, MPI_INT, rawmatC, 1, MPI_INT, 0, cart_comm); 
-    
-    if (cart_rank == 0){
-        printf("\nDisplaying only in node 0:\n");
-        for (int i = 0; i < dims[0]; i++){
-            for (int j = 0; j < dims[1]; j++){
-                printf("%d ", rawmatC[i][j]);
-                if ((j + 1) % dims[0] == 0) printf("\n");
-            }
-        }  
-        printf("\n");      
-    }
+        matC[cart_rank] = mult_mat_cannon(matA[cart_rank], matB[cart_rank], dims[0], cart_comm, cart_rank);
     
     MPI_Comm_free(&cart_comm);
     MPI_Finalize();
